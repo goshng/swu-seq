@@ -1,0 +1,57 @@
+#!/bin/bash
+
+# ./run NC_027250.1 14789 5000
+
+if [ $# -eq 0 ]; then
+  echo "bash run <REF GENOME> <FASTQ DATA> <CONTIG>"
+  exit
+fi
+
+REFGENOME=$1
+FASTQDATA=$2
+CLENGTH=$3
+
+rm -rf out
+mkdir out
+
+##############################################################
+# Fetch a DNA sequence from NCBI.
+bash src/sh/fetch-ncbi-sequence.sh $REFGENOME
+mv $REFGENOME.fa out
+
+
+# Align the reads on the BWA-indexed reference genome.
+bash src/sh/bwa-mem.sh out/${REFGENOME}.fa data/${FASTQDATA}_1.fq data/${FASTQDATA}_2.fq
+
+samtools fastq out/${REFGENOME}.fa.sorted.bam -1 out/${FASTQDATA}_1-bwa.fq -2 out/${FASTQDATA}_2-bwa.fq
+
+# Extract short reads that are aligned to the reference genome using SAMTOOLS.
+# perl src/pl/collate-reads-by-fastq.pl data/${FASTQDATA}_1.fq data/${FASTQDATA}_2.fq data/${FASTQDATA}_1.fq-bwa_1.fq data/${FASTQDATA}_2.fq-bwa_2.fq | sort -n | uniq > out/${FASTQDATA}-spades0.txt
+# perl src/pl/grep-fq-by-id.pl out/${FASTQDATA}-spades0.txt data/${FASTQDATA}_1.fq > out/${FASTQDATA}_1-bwa.fq
+# perl src/pl/grep-fq-by-id.pl out/${FASTQDATA}-spades0.txt data/${FASTQDATA}_2.fq > out/${FASTQDATA}_2-bwa.fq
+
+perl src/pl/id-reads-by-fastq.pl data/${FASTQDATA}_1.fq out/${FASTQDATA}_1-bwa.fq > out/${FASTQDATA}-spades0.txt
+
+
+# Assemble the bwa-filtered read data set.
+bash src/sh/spades-paired-end.sh out/${FASTQDATA}_1-bwa.fq out/${FASTQDATA}_2-bwa.fq out/spades-bwa-jdj0 log
+
+# Ignore this line.
+# echo "perl src/pl/ExSeedsJava.pl tmp/jdj-option-bwa.txt out/spades-bwa/scaffolds.fasta" | mail -s "job is finished" goshng@gmail.com
+
+
+##############################################################
+# BLAST DB
+# Convert a paired-end data set to a FASTA data set.
+perl src/pl/jdpark-fastq2fas.pl S891 data/${FASTQDATA}_1.fq out/${FASTQDATA}_1.fas
+perl src/pl/jdpark-fastq2fas.pl S892 data/${FASTQDATA}_2.fq out/${FASTQDATA}_2.fas
+
+# Concatenate the two FASTA files.
+bash src/sh/jdpark-concatenate-fasta.sh out/${FASTQDATA}_1.fas out/${FASTQDATA}_2.fas out/${FASTQDATA}.fas
+
+# Make a BLAST database file from the concatenated FASTA file.
+bash src/sh/jdpark-makeblastdb.sh out/${FASTQDATA}.fas out/${FASTQDATA}.blastdb
+
+
+
+bash src/sh/jdpark-spades-repeat.sh ${FASTQDATA} 0 9 500000 $CLENGTH
